@@ -15,6 +15,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ../backend/migrations:/docker-entrypoint-initdb.d:ro
     networks:
       - bobastream_network
     healthcheck:
@@ -22,6 +23,47 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: bobastream_backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_ENV=development
+      - APP_PORT=8080
+      - APP_HOST=0.0.0.0
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=bobastream123
+      - DB_NAME=boba_stream
+      - DB_SSLMODE=disable
+      - JWT_SECRET=8f3e9a2b4c7d1e6f5a8b9c0d2e4f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f
+      - JWT_REFRESH_SECRET=1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
+      - JWT_ACCESS_EXPIRY=15m
+      - JWT_REFRESH_EXPIRY=168h
+      - PCLOUD_API_BASE_URL=https://api.pcloud.com
+      - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+      - RATE_LIMIT_AUTH=5
+      - RATE_LIMIT_API=60
+      - RATE_LIMIT_STREAM=100
+      - CRON_REFRESH_LINKS=0 */6 * * *
+      - CRON_AGGREGATE_STATS=0 0 * * *
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bobastream_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # pgAdmin (Optional - for database management)
   pgadmin:
