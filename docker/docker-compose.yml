@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # PostgreSQL Database
-  postgres:
+  db:
     image: postgres:15-alpine
     container_name: bobastream_db
     restart: unless-stopped
@@ -12,17 +12,52 @@ services:
       POSTGRES_DB: boba_stream
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5555:5555"
+      - "5555:5432"  # ✅ FIX: Map eksternal 5555 ke internal 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../backend/migrations:/docker-entrypoint-initdb.d:ro
     networks:
       - bobastream_network
+    command: -p 5432  # ✅ Paksa postgres jalan di port 5432
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U postgres -p 5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Migration Runner (One-time job)
+  migrator:
+    image: postgres:15-alpine
+    container_name: bobastream_migrator
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432  # ✅ Internal port
+      PGUSER: postgres
+      PGPASSWORD: bobastream123
+      PGDATABASE: boba_stream
+    volumes:
+      - ../backend/migrations:/migrations:ro
+    networks:
+      - bobastream_network
+    command: >
+      sh -c "
+        echo '🔄 Running migrations...' &&
+        psql -f /migrations/001_create_users_table.sql &&
+        psql -f /migrations/002_create_pcloud_credentials_table.sql &&
+        psql -f /migrations/003_create_categories_table.sql &&
+        psql -f /migrations/004_create_videos_table.sql &&
+        psql -f /migrations/005_create_wrapper_links_table.sql &&
+        psql -f /migrations/006_create_video_views_table.sql &&
+        psql -f /migrations/007_create_video_likes_table.sql &&
+        psql -f /migrations/008_create_ads_table.sql &&
+        psql -f /migrations/009_create_ad_impressions_table.sql &&
+        psql -f /migrations/010_create_daily_stats_table.sql &&
+        psql -f /migrations/011_create_indexes.sql &&
+        echo '✅ Migrations completed successfully!'
+      "
+    restart: "no"  # Run once only
 
   # Backend API
   backend:
@@ -37,8 +72,8 @@ services:
       - APP_ENV=development
       - APP_PORT=8080
       - APP_HOST=0.0.0.0
-      - DB_HOST=postgres
-      - DB_PORT=5555
+      - DB_HOST=db  # ✅ Service name
+      - DB_PORT=5432  # ✅ Internal port
       - DB_USER=postgres
       - DB_PASSWORD=bobastream123
       - DB_NAME=boba_stream
@@ -55,17 +90,19 @@ services:
       - CRON_REFRESH_LINKS=0 */6 * * *
       - CRON_AGGREGATE_STATS=0 0 * * *
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully  # ✅ Tunggu migrations selesai
     networks:
       - bobastream_network
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # pgAdmin (Optional - for database management)
+  # pgAdmin (Optional)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: bobastream_pgadmin
@@ -81,7 +118,7 @@ services:
     networks:
       - bobastream_network
     depends_on:
-      - postgres
+      - db
 
 volumes:
   postgres_data:

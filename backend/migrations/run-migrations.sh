@@ -18,7 +18,7 @@ echo "Running migration 002: Create pcloud credentials table..."
 PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /migrations/002_create_pcloud_credentials_table.sql
 
 echo "Running migration 002.5: Create categories table..."
-PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /migrations/002_5_create_categories_table.sql
+PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /migrations/003_create_categories_table.sql
 
 echo "Running migration 004: Create videos table..."
 PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /migrations/004_create_videos_table.sql
