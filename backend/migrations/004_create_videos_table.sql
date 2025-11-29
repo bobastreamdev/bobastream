@@ -16,7 +16,8 @@ CREATE TABLE videos (
     is_published BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    published_at TIMESTAMP
+    published_at TIMESTAMP,
+    deleted_at TIMESTAMP  -- ← ADD THIS
 );
 
 -- Indexes
@@ -26,6 +27,7 @@ CREATE INDEX idx_videos_pcloud_credential ON videos(pcloud_credential_id);
 CREATE INDEX idx_videos_view_count ON videos(view_count DESC);
 CREATE INDEX idx_videos_like_count ON videos(like_count DESC);
 CREATE INDEX idx_videos_tags ON videos USING GIN(tags);
+CREATE INDEX idx_videos_deleted_at ON videos(deleted_at);  -- ← ADD THIS
 
 -- Comment for clarity
 COMMENT ON COLUMN videos.pcloud_credential_id IS 'References pcloud account used to store this video';

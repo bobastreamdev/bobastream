@@ -12,7 +12,7 @@ services:
       POSTGRES_DB: boba_stream
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"
+      - "5555:5555"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../backend/migrations:/docker-entrypoint-initdb.d:ro
@@ -38,7 +38,7 @@ services:
       - APP_PORT=8080
       - APP_HOST=0.0.0.0
       - DB_HOST=postgres
-      - DB_PORT=5432
+      - DB_PORT=5555
       - DB_USER=postgres
       - DB_PASSWORD=bobastream123
       - DB_NAME=boba_stream

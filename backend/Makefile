@@ -90,4 +90,4 @@ docker-logs: ## Show Docker logs
 	@docker-compose logs -f
 
 # Database connection string (override with your own)
-DB_URL ?= postgresql://postgres:your_password@localhost:5432/boba_stream?sslmode=disable
+DB_URL ?= postgresql://postgres:bobastream123@localhost:5555/boba_stream?sslmode=disable

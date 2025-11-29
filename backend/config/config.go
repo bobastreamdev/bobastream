@@ -76,7 +76,7 @@ func LoadConfig() error {
 		},
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnv("DB_PORT", "5432"),
+			Port:     getEnv("DB_PORT", "5555"),
 			User:     getEnv("DB_USER", "postgres"),
 			Password: getEnv("DB_PASSWORD", ""),
 			Name:     getEnv("DB_NAME", "boba_stream"),
