@@ -38,15 +38,15 @@ migrate-up: ## Run database migrations
 	@echo "⬆️  Running migrations..."
 	@psql $(DB_URL) -f migrations/001_create_users_table.sql
 	@psql $(DB_URL) -f migrations/002_create_pcloud_credentials_table.sql
-	@psql $(DB_URL) -f migrations/002_5_create_categories_table.sql
-	@psql $(DB_URL) -f migrations/003_create_videos_table.sql
-	@psql $(DB_URL) -f migrations/004_create_wrapper_links_table.sql
-	@psql $(DB_URL) -f migrations/005_create_video_views_table.sql
-	@psql $(DB_URL) -f migrations/006_create_video_likes_table.sql
-	@psql $(DB_URL) -f migrations/007_create_ads_table.sql
-	@psql $(DB_URL) -f migrations/008_create_ad_impressions_table.sql
-	@psql $(DB_URL) -f migrations/009_create_daily_stats_table.sql
-	@psql $(DB_URL) -f migrations/010_create_indexes.sql
+	@psql $(DB_URL) -f migrations/003_create_categories_table.sql
+	@psql $(DB_URL) -f migrations/004_create_videos_table.sql
+	@psql $(DB_URL) -f migrations/005_create_wrapper_links_table.sql
+	@psql $(DB_URL) -f migrations/006_create_video_views_table.sql
+	@psql $(DB_URL) -f migrations/007_create_video_likes_table.sql
+	@psql $(DB_URL) -f migrations/008_create_ads_table.sql
+	@psql $(DB_URL) -f migrations/009_create_ad_impressions_table.sql
+	@psql $(DB_URL) -f migrations/010_create_daily_stats_table.sql
+	@psql $(DB_URL) -f migrations/011_create_indexes.sql
 	@echo "✅ Migrations complete"
 
 migrate-down: ## Rollback database migrations
