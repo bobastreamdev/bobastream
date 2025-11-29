@@ -19,7 +19,7 @@ type Video struct {
 	FileSizeMB          float64        `gorm:"type:decimal(10,2)" json:"file_size_mb"`
 	PCloudFileID        string         `gorm:"type:varchar(255)" json:"-"`
 	PCloudCredentialID  uuid.UUID      `gorm:"type:uuid;not null" json:"-"`
-	Genre               string         `gorm:"type:varchar(100)" json:"genre"`
+	CategoryID          *uuid.UUID     `gorm:"type:uuid" json:"category_id,omitempty"`
 	Tags                pq.StringArray `gorm:"type:text[]" json:"tags"`
 	ViewCount           int            `gorm:"default:0" json:"view_count"`
 	LikeCount           int            `gorm:"default:0" json:"like_count"`
@@ -31,6 +31,7 @@ type Video struct {
 
 	// Relationships
 	PCloudCredential *PCloudCredential `gorm:"foreignKey:PCloudCredentialID" json:"-"`
+	Category         *Category         `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 	WrapperLink      *WrapperLink      `gorm:"foreignKey:VideoID" json:"wrapper_link,omitempty"`
 	VideoLikes       []VideoLike       `gorm:"foreignKey:VideoID" json:"-"`
 	VideoViews       []VideoView       `gorm:"foreignKey:VideoID" json:"-"`

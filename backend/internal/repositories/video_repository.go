@@ -98,18 +98,19 @@ func (r *VideoRepository) GetAllVideos(page, limit int) ([]models.Video, int64, 
 	return videos, total, err
 }
 
-// GetRelatedVideos gets related videos based on genre and tags
-func (r *VideoRepository) GetRelatedVideos(videoID uuid.UUID, genre string, tags []string, limit int) ([]models.Video, error) {
+// GetRelatedVideos gets related videos based on category and tags
+func (r *VideoRepository) GetRelatedVideos(videoID uuid.UUID, categoryID string, tags []string, limit int) ([]models.Video, error) {
 	var videos []models.Video
 
 	query := r.db.Where("id != ? AND is_published = ?", videoID, true)
 
-	// Prioritize same genre
-	if genre != "" {
-		query = query.Where("genre = ?", genre)
+	// Prioritize same category
+	if categoryID != "" {
+		query = query.Where("category_id = ?", categoryID)
 	}
 
 	err := query.Preload("WrapperLink").
+		Preload("Category").
 		Order("view_count DESC").
 		Limit(limit).
 		Find(&videos).Error
@@ -132,6 +133,7 @@ func (r *VideoRepository) SearchVideos(keyword string, page, limit int) ([]model
 	}
 
 	err := query.Preload("WrapperLink").
+		Preload("Category").
 		Order("view_count DESC").
 		Offset(offset).
 		Limit(limit).
@@ -140,20 +142,45 @@ func (r *VideoRepository) SearchVideos(keyword string, page, limit int) ([]model
 	return videos, total, err
 }
 
-// GetVideosByGenre gets videos by genre
-func (r *VideoRepository) GetVideosByGenre(genre string, page, limit int) ([]models.Video, int64, error) {
+// SearchVideosByCategory searches videos within a category
+func (r *VideoRepository) SearchVideosByCategory(keyword string, categoryID uuid.UUID, page, limit int) ([]models.Video, int64, error) {
 	var videos []models.Video
 	var total int64
 
 	offset := (page - 1) * limit
 
-	query := r.db.Where("is_published = ? AND genre = ?", true, genre)
+	query := r.db.Where("is_published = ? AND category_id = ? AND (title ILIKE ? OR description ILIKE ?)", 
+		true, categoryID, "%"+keyword+"%", "%"+keyword+"%")
 
 	if err := query.Model(&models.Video{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	err := query.Preload("WrapperLink").
+		Preload("Category").
+		Order("view_count DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&videos).Error
+
+	return videos, total, err
+}
+
+// GetVideosByCategory gets videos by category
+func (r *VideoRepository) GetVideosByCategory(categoryID uuid.UUID, page, limit int) ([]models.Video, int64, error) {
+	var videos []models.Video
+	var total int64
+
+	offset := (page - 1) * limit
+
+	query := r.db.Where("is_published = ? AND category_id = ?", true, categoryID)
+
+	if err := query.Model(&models.Video{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	err := query.Preload("WrapperLink").
+		Preload("Category").
 		Order("published_at DESC").
 		Offset(offset).
 		Limit(limit).
