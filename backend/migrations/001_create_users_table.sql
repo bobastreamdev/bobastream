@@ -10,7 +10,7 @@ CREATE TABLE users (
     role user_role DEFAULT 'viewer',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP
+    last_login TIMESTAMP,
     deleted_at TIMESTAMP
 );
 
