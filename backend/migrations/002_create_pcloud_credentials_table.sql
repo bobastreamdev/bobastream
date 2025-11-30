@@ -10,10 +10,12 @@ CREATE TABLE pcloud_credentials (
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    deleted_at TIMESTAMP
 );
 
 -- Indexes
 CREATE INDEX idx_pcloud_is_active ON pcloud_credentials(is_active);
+CREATE INDEX idx_pcloud_deleted_at ON pcloud_credentials(deleted_at);
 
 -- Trigger for updated_at
 CREATE TRIGGER update_pcloud_credentials_updated_at

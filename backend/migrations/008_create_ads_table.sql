@@ -12,12 +12,14 @@ CREATE TABLE ads (
     priority INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    deleted_at TIMESTAMP
 );
 
 -- Indexes
 CREATE INDEX idx_ads_type ON ads(ad_type);
 CREATE INDEX idx_ads_active ON ads(is_active);
 CREATE INDEX idx_ads_priority ON ads(priority DESC);
+CREATE INDEX idx_ads_deleted_at ON ads(deleted_at);
 
 -- Trigger for updated_at
 CREATE TRIGGER update_ads_updated_at

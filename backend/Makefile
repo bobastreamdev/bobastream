@@ -1,4 +1,4 @@
-.PHONY: help run build clean test migrate-up migrate-down seed dev
+.PHONY: help run build clean test migrate-up migrate-down seed dev docker-up docker-down
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -78,16 +78,31 @@ install-tools: ## Install development tools
 
 docker-up: ## Start Docker containers
 	@echo "🐳 Starting Docker containers..."
-	@docker-compose up -d
+	@docker-compose -f docker/docker-compose.yml up -d
 	@echo "✅ Docker containers started"
 
 docker-down: ## Stop Docker containers
 	@echo "🐳 Stopping Docker containers..."
-	@docker-compose down
+	@docker-compose -f docker/docker-compose.yml down
 	@echo "✅ Docker containers stopped"
 
 docker-logs: ## Show Docker logs
-	@docker-compose logs -f
+	@docker-compose -f docker/docker-compose.yml logs -f
+
+docker-restart: ## Restart Docker containers
+	@echo "🔄 Restarting Docker containers..."
+	@docker-compose -f docker/docker-compose.yml restart
+	@echo "✅ Docker containers restarted"
+
+docker-clean: ## Clean Docker (remove volumes)
+	@echo "🧹 Cleaning Docker..."
+	@docker-compose -f docker/docker-compose.yml down -v
+	@echo "✅ Docker cleaned"
+
+docker-seed: ## Run seed inside Docker backend container
+	@echo "🌱 Running seed in Docker..."
+	@docker exec bobastream_backend ./main seed
+	@echo "✅ Seed complete"
 
 # Database connection string (override with your own)
 DB_URL ?= postgresql://postgres:bobastream123@localhost:5555/boba_stream?sslmode=disable

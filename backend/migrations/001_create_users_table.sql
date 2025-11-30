@@ -11,12 +11,14 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP
+    deleted_at TIMESTAMP
 );
 
 -- Indexes
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_users_deleted_at ON users(deleted_at);
 
 -- Trigger for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
