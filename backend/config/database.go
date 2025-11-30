@@ -52,10 +52,13 @@ func InitDatabase() error {
 		return fmt.Errorf("failed to get database instance: %w", err)
 	}
 
-	// Connection pool settings
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	// ✅ PRODUCTION-READY CONNECTION POOL SETTINGS
+	// Formula: MaxOpenConns = (Expected concurrent requests / Avg query time) * 1.5
+	// For 1000 req/s with 100ms avg query: (1000 * 0.1) * 1.5 = 150 connections
+	sqlDB.SetMaxOpenConns(100)                    // ✅ 100 concurrent connections (increased from 25)
+	sqlDB.SetMaxIdleConns(25)                     // ✅ 25 idle connections (increased from 10)
+	sqlDB.SetConnMaxLifetime(1 * time.Hour)       // ✅ Reuse connections longer (increased from 5 minutes)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)    // ✅ Close idle connections after 10 minutes
 
 	// Test connection
 	if err := sqlDB.Ping(); err != nil {
@@ -63,6 +66,9 @@ func InitDatabase() error {
 	}
 
 	log.Println("✅ Database connected successfully")
+	log.Printf("📊 Connection pool settings: MaxOpen=%d, MaxIdle=%d, MaxLifetime=%s\n",
+		100, 25, 1*time.Hour)
+	
 	return nil
 }
 

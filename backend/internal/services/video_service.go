@@ -1,10 +1,13 @@
 package services
 
 import (
+	"bobastream/internal/cache"
 	"bobastream/internal/models"
 	"bobastream/internal/repositories"
 	"bobastream/internal/utils"
+	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -39,8 +42,22 @@ type ScoredVideo struct {
 	Score float64
 }
 
-// GetFeedVideos gets feed videos with scoring
+// ✅ CACHED: GetFeedVideos with Redis caching
 func (s *VideoService) GetFeedVideos(page, limit int) ([]models.Video, int64, error) {
+	ctx := context.Background()
+	cacheKey := fmt.Sprintf("feed:page:%d:limit:%d", page, limit)
+	
+	// ✅ Try cache first
+	var cachedResult struct {
+		Videos []models.Video
+		Total  int64
+	}
+	
+	if err := cache.Get(ctx, cacheKey, &cachedResult); err == nil {
+		return cachedResult.Videos, cachedResult.Total, nil
+	}
+	
+	// ✅ Cache miss - fetch from DB
 	videos, total, err := s.videoRepo.GetPublishedVideos(page, limit)
 	if err != nil {
 		return nil, 0, err
@@ -65,6 +82,12 @@ func (s *VideoService) GetFeedVideos(page, limit int) ([]models.Video, int64, er
 	for i, sv := range scoredVideos {
 		result[i] = sv.Video
 	}
+
+	// ✅ Cache result for 5 minutes
+	cache.Set(ctx, cacheKey, map[string]interface{}{
+		"Videos": result,
+		"Total":  total,
+	}, 5*time.Minute)
 
 	return result, total, nil
 }
@@ -114,7 +137,7 @@ func (s *VideoService) GetRelatedVideos(videoID uuid.UUID, limit int) ([]models.
 	return s.videoRepo.GetRelatedVideos(videoID, categoryID, tags, limit)
 }
 
-// ✅ FIXED: TrackVideoView with proper view count increment logic
+// TrackVideoView tracks video view with proper view count increment logic
 func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sessionID, viewerIP, userAgent string, watchDuration int, videoDuration int) error {
 	// Calculate watched percentage
 	watchedPercentage := 0.0
@@ -134,7 +157,7 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 	shouldIncrementView := false
 
 	if existingView != nil {
-		// ✅ View exists - check if crossing 30% threshold
+		// View exists - check if crossing 30% threshold
 		wasInvalid := existingView.WatchedPercentage < 30
 		isNowValid := watchedPercentage >= 30
 
@@ -146,12 +169,12 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 			return err
 		}
 
-		// ✅ Increment ONLY when crossing 30% threshold (first time)
+		// Increment ONLY when crossing 30% threshold (first time)
 		if wasInvalid && isNowValid {
 			shouldIncrementView = true
 		}
 	} else {
-		// ✅ New view - create record
+		// New view - create record
 		view := &models.VideoView{
 			VideoID:              videoID,
 			UserID:               userID,
@@ -166,14 +189,18 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 			return err
 		}
 
-		// ✅ Increment if first view is already >= 30%
+		// Increment if first view is already >= 30%
 		if watchedPercentage >= 30 {
 			shouldIncrementView = true
 		}
 	}
 
-	// ✅ Increment view count if conditions met
+	// Increment view count if conditions met
 	if shouldIncrementView {
+		// ✅ Invalidate feed cache when view count changes
+		ctx := context.Background()
+		cache.Delete(ctx, "feed:*") // Delete all feed cache keys
+		
 		return s.videoRepo.IncrementViewCount(videoID)
 	}
 
@@ -201,6 +228,10 @@ func (s *VideoService) LikeVideo(videoID, userID uuid.UUID) error {
 		return err
 	}
 
+	// ✅ Invalidate feed cache
+	ctx := context.Background()
+	cache.Delete(ctx, "feed:*")
+
 	// Increment like count
 	return s.videoRepo.IncrementLikeCount(videoID)
 }
@@ -220,6 +251,10 @@ func (s *VideoService) UnlikeVideo(videoID, userID uuid.UUID) error {
 	if err := s.videoLikeRepo.Delete(videoID, userID); err != nil {
 		return err
 	}
+
+	// ✅ Invalidate feed cache
+	ctx := context.Background()
+	cache.Delete(ctx, "feed:*")
 
 	// Decrement like count
 	return s.videoRepo.DecrementLikeCount(videoID)
@@ -242,16 +277,28 @@ func (s *VideoService) GetTopVideos(limit, days int) ([]models.Video, error) {
 
 // CreateVideo creates a new video (admin)
 func (s *VideoService) CreateVideo(video *models.Video) error {
+	// ✅ Invalidate feed cache
+	ctx := context.Background()
+	cache.Delete(ctx, "feed:*")
+	
 	return s.videoRepo.Create(video)
 }
 
 // UpdateVideo updates video (admin)
 func (s *VideoService) UpdateVideo(video *models.Video) error {
+	// ✅ Invalidate feed cache
+	ctx := context.Background()
+	cache.Delete(ctx, "feed:*")
+	
 	return s.videoRepo.Update(video)
 }
 
 // DeleteVideo deletes video (admin)
 func (s *VideoService) DeleteVideo(id uuid.UUID) error {
+	// ✅ Invalidate feed cache
+	ctx := context.Background()
+	cache.Delete(ctx, "feed:*")
+	
 	return s.videoRepo.Delete(id)
 }
 

@@ -8,14 +8,25 @@ import (
 
 type AggregateStatsJob struct {
 	analyticsService *services.AnalyticsService
+	lock             *JobLock
 }
 
 func NewAggregateStatsJob(analyticsService *services.AnalyticsService) *AggregateStatsJob {
-	return &AggregateStatsJob{analyticsService: analyticsService}
+	return &AggregateStatsJob{
+		analyticsService: analyticsService,
+		lock:             NewJobLock(),
+	}
 }
 
 // Run aggregates daily statistics
 func (j *AggregateStatsJob) Run() {
+	// ✅ Prevent overlapping runs
+	if !j.lock.TryLock() {
+		log.Println("⏭️  [CRON] Aggregate stats already running, skipping...")
+		return
+	}
+	defer j.lock.Unlock()
+
 	yesterday := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
 	
 	log.Printf("📊 [CRON] Aggregating stats for %s...\n", yesterday.Format("2006-01-02"))

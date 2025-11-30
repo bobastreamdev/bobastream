@@ -16,6 +16,7 @@ type Config struct {
 	CORS      CORSConfig
 	RateLimit RateLimitConfig
 	Cron      CronConfig
+	Redis     RedisConfig // ✅ ADD
 }
 
 type AppConfig struct {
@@ -57,6 +58,14 @@ type RateLimitConfig struct {
 type CronConfig struct {
 	RefreshLinks   string
 	AggregateStats string
+}
+
+// ✅ ADD: Redis configuration
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
 }
 
 var GlobalConfig *Config
@@ -102,6 +111,13 @@ func LoadConfig() error {
 		Cron: CronConfig{
 			RefreshLinks:   getEnv("CRON_REFRESH_LINKS", "0 */6 * * *"),
 			AggregateStats: getEnv("CRON_AGGREGATE_STATS", "0 0 * * *"),
+		},
+		// ✅ ADD: Redis config
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnv("REDIS_PORT", "6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvAsInt("REDIS_DB", 0),
 		},
 	}
 

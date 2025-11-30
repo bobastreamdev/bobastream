@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"bobastream/internal/models"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -122,16 +123,17 @@ func (r *VideoRepository) GetRelatedVideos(videoID uuid.UUID, categoryID string,
 	return videos, err
 }
 
-// ✅ FIXED: SearchVideos with SQL injection protection
+// ✅ FIXED: SearchVideos with explicit escaping for ILIKE wildcards
 func (r *VideoRepository) SearchVideos(keyword string, page, limit int) ([]models.Video, int64, error) {
 	var videos []models.Video
 	var total int64
 
 	offset := (page - 1) * limit
 
-	// ✅ Escape special LIKE characters
-	escapedKeyword := keyword
-	// No need to manually escape - GORM handles it with parameterized queries
+	// ✅ Escape special LIKE characters (%, _)
+	escapedKeyword := strings.ReplaceAll(keyword, "%", "\\%")
+	escapedKeyword = strings.ReplaceAll(escapedKeyword, "_", "\\_")
+	
 	searchPattern := "%" + escapedKeyword + "%"
 
 	query := r.db.Where("is_published = ? AND (title ILIKE ? OR description ILIKE ?)",
@@ -151,14 +153,18 @@ func (r *VideoRepository) SearchVideos(keyword string, page, limit int) ([]model
 	return videos, total, err
 }
 
-// ✅ FIXED: SearchVideosByCategory with SQL injection protection
+// ✅ FIXED: SearchVideosByCategory with explicit escaping
 func (r *VideoRepository) SearchVideosByCategory(keyword string, categoryID uuid.UUID, page, limit int) ([]models.Video, int64, error) {
 	var videos []models.Video
 	var total int64
 
 	offset := (page - 1) * limit
 
-	searchPattern := "%" + keyword + "%"
+	// ✅ Escape special LIKE characters
+	escapedKeyword := strings.ReplaceAll(keyword, "%", "\\%")
+	escapedKeyword = strings.ReplaceAll(escapedKeyword, "_", "\\_")
+	
+	searchPattern := "%" + escapedKeyword + "%"
 
 	query := r.db.Where("is_published = ? AND category_id = ? AND (title ILIKE ? OR description ILIKE ?)",
 		true, categoryID, searchPattern, searchPattern)
@@ -200,23 +206,21 @@ func (r *VideoRepository) GetVideosByCategory(categoryID uuid.UUID, page, limit 
 	return videos, total, err
 }
 
-// ✅ FIXED: IncrementViewCount with row-level locking to prevent race conditions
+// IncrementViewCount increments video view count
 func (r *VideoRepository) IncrementViewCount(id uuid.UUID) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// ✅ Lock row with FOR UPDATE to prevent concurrent increments
 		var video models.Video
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&video, "id = ?", id).Error; err != nil {
 			return err
 		}
 
-		// ✅ Atomic increment
 		return tx.Model(&models.Video{}).Where("id = ?", id).
 			UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error
 	})
 }
 
-// ✅ FIXED: IncrementLikeCount with row-level locking
+// IncrementLikeCount increments video like count
 func (r *VideoRepository) IncrementLikeCount(id uuid.UUID) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var video models.Video
@@ -230,7 +234,7 @@ func (r *VideoRepository) IncrementLikeCount(id uuid.UUID) error {
 	})
 }
 
-// ✅ FIXED: DecrementLikeCount with row-level locking
+// DecrementLikeCount decrements video like count
 func (r *VideoRepository) DecrementLikeCount(id uuid.UUID) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var video models.Video

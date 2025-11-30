@@ -2,6 +2,7 @@ package main
 
 import (
 	"bobastream/config"
+	"bobastream/internal/cache"
 	"bobastream/internal/cron"
 	"bobastream/internal/handlers"
 	"bobastream/internal/middleware"
@@ -30,6 +31,19 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 	defer config.CloseDatabase()
+
+	// ✅ Initialize Redis cache
+	redisAddr := fmt.Sprintf("%s:%s",
+		config.GlobalConfig.Redis.Host,
+		config.GlobalConfig.Redis.Port)
+
+	if err := cache.InitRedis(redisAddr, config.GlobalConfig.Redis.Password); err != nil {
+		log.Println("⚠️  Redis connection failed (running without cache):", err)
+		// Don't fatal - app can run without cache
+	} else {
+		log.Println("✅ Redis cache connected")
+		defer cache.Close()
+	}
 
 	// Initialize repositories
 	userRepo := repositories.NewUserRepository(config.DB)
@@ -66,7 +80,7 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:      "BOBA STREAM API",
 		ServerHeader: "Fiber",
-		BodyLimit:    500 * 1024 * 1024, // 500MB for video uploads
+		BodyLimit:    500 * 1024 * 1024,
 	})
 
 	// Global middleware
@@ -76,11 +90,57 @@ func main() {
 	}))
 	app.Use(middleware.SetupCORS())
 
-	// Health check
+	// Health check endpoints
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status": "ok",
 			"app":    "BOBA STREAM API",
+		})
+	})
+
+	app.Get("/health/live", func(c *fiber.Ctx) error {
+		sqlDB, err := config.DB.DB()
+		if err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "error",
+				"error":  "database connection failed",
+			})
+		}
+
+		if err := sqlDB.Ping(); err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "error",
+				"error":  "database ping failed",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status": "ok",
+			"app":    "BOBA STREAM API",
+			"db":     "connected",
+		})
+	})
+
+	app.Get("/health/ready", func(c *fiber.Ctx) error {
+		sqlDB, err := config.DB.DB()
+		if err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "error",
+				"error":  "db connection failed",
+			})
+		}
+		if err := sqlDB.Ping(); err != nil {
+			return c.Status(503).JSON(fiber.Map{
+				"status": "error",
+				"error":  "db ping failed",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status": "ready",
+			"checks": fiber.Map{
+				"database": "ok",
+			},
 		})
 	})
 
@@ -105,7 +165,7 @@ func main() {
 	videos.Get("/:id/related", videoHandler.GetRelatedVideos)
 	videos.Post("/:id/view", videoHandler.TrackView)
 
-	// Like routes (auth required)
+	// Like routes
 	videos.Post("/:id/like", middleware.AuthRequired(), likeHandler.LikeVideo)
 	videos.Delete("/:id/like", middleware.AuthRequired(), likeHandler.UnlikeVideo)
 	videos.Get("/:id/liked", middleware.AuthRequired(), likeHandler.CheckLiked)
@@ -114,21 +174,20 @@ func main() {
 	users := api.Group("/users", middleware.AuthRequired())
 	users.Get("/me/likes", likeHandler.GetUserLikedVideos)
 
-	// Ads routes (public)
+	// Ads routes
 	ads := api.Group("/ads")
 	ads.Get("/preroll", adHandler.GetPrerollAd)
 	ads.Get("/banner", adHandler.GetBannerAd)
 	ads.Get("/popup", adHandler.GetPopupAd)
 	ads.Post("/:id/impression", adHandler.TrackImpression)
 
-	// Watch page & streaming
+	// Watch & streaming
 	app.Get("/watch/:token", streamHandler.ShowPlayer)
 	app.Get("/stream/:token", middleware.RateLimitStream(), streamHandler.StreamVideo)
 
 	// Admin routes
 	admin := api.Group("/admin", middleware.AuthRequired(), middleware.AdminOnly())
 
-	// Admin video management
 	adminVideos := admin.Group("/videos")
 	adminVideos.Get("/", adminVideoHandler.GetAllVideos)
 	adminVideos.Post("/upload", adminVideoHandler.UploadVideo)
@@ -136,7 +195,6 @@ func main() {
 	adminVideos.Delete("/:id", adminVideoHandler.DeleteVideo)
 	adminVideos.Post("/:id/refresh", adminVideoHandler.RefreshVideoLink)
 
-	// Admin ads management
 	adminAds := admin.Group("/ads")
 	adminAds.Get("/", adminAdHandler.GetAllAds)
 	adminAds.Get("/:id", adminAdHandler.GetAdByID)
@@ -145,7 +203,6 @@ func main() {
 	adminAds.Delete("/:id", adminAdHandler.DeleteAd)
 	adminAds.Post("/:id/toggle", adminAdHandler.ToggleActive)
 
-	// Admin analytics
 	adminAnalytics := admin.Group("/analytics")
 	adminAnalytics.Get("/overview", analyticsHandler.GetOverview)
 	adminAnalytics.Get("/daily", analyticsHandler.GetDailyStats)
@@ -153,7 +210,6 @@ func main() {
 	adminAnalytics.Get("/monthly", analyticsHandler.GetMonthlyStats)
 	adminAnalytics.Get("/top-videos", analyticsHandler.GetTopVideos)
 
-	// Admin pCloud accounts management
 	adminPCloud := admin.Group("/pcloud/accounts")
 	adminPCloud.Get("/", pcloudHandler.GetAllAccounts)
 	adminPCloud.Get("/:id", pcloudHandler.GetAccountByID)
@@ -164,12 +220,10 @@ func main() {
 
 	// Initialize cron jobs
 	c := cronpkg.New()
-	
-	// Refresh expired pCloud links (every 6 hours)
+
 	refreshLinksJob := cron.NewRefreshLinksJob(pcloudService)
 	c.AddFunc(config.GlobalConfig.Cron.RefreshLinks, refreshLinksJob.Run)
 
-	// Aggregate daily stats (every midnight)
 	aggregateStatsJob := cron.NewAggregateStatsJob(analyticsService)
 	c.AddFunc(config.GlobalConfig.Cron.AggregateStats, aggregateStatsJob.Run)
 
@@ -184,6 +238,7 @@ func main() {
 		<-sigChan
 		log.Println("🛑 Shutting down server...")
 		c.Stop()
+		cache.Close()
 		app.Shutdown()
 	}()
 
@@ -191,7 +246,7 @@ func main() {
 	port := config.GlobalConfig.App.Port
 	log.Printf("🚀 Server starting on port %s\n", port)
 	log.Printf("🌐 Environment: %s\n", config.GlobalConfig.App.Env)
-	
+
 	if err := app.Listen(fmt.Sprintf(":%s", port)); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}

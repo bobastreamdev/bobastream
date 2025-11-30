@@ -15,6 +15,11 @@ func NewAnalyticsRepository(db *gorm.DB) *AnalyticsRepository {
 	return &AnalyticsRepository{db: db}
 }
 
+// ✅ ADD: GetDB returns the database instance
+func (r *AnalyticsRepository) GetDB() *gorm.DB {
+	return r.db
+}
+
 // CreateDailyStat creates daily stats record
 func (r *AnalyticsRepository) CreateDailyStat(stat *models.DailyStat) error {
 	return r.db.Create(stat).Error

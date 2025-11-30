@@ -4,7 +4,6 @@ import (
 	"bobastream/config"
 	"bobastream/internal/models"
 	"bobastream/internal/repositories"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,38 +135,54 @@ func (s *PCloudService) UploadFile(file multipart.File, filename string, fileSiz
 	return credential, fileID, hash, nil
 }
 
-// uploadToPCloud actual upload to pCloud API
+// ✅ FIXED: uploadToPCloud with streaming upload (no memory leak)
 func (s *PCloudService) uploadToPCloud(apiToken string, file multipart.File, filename string) (int64, string, error) {
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+	// ✅ Create pipe for streaming upload
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
 
-	// Add file
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		return 0, "", err
-	}
+	// ✅ Upload in separate goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		defer pw.Close()
+		defer writer.Close()
 
-	if _, err := io.Copy(part, file); err != nil {
-		return 0, "", err
-	}
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			errChan <- err
+			pw.CloseWithError(err)
+			return
+		}
 
-	writer.Close()
+		if _, err := io.Copy(part, file); err != nil {
+			errChan <- err
+			pw.CloseWithError(err)
+			return
+		}
 
-	// Create request
+		errChan <- nil
+	}()
+
+	// Create request with streaming body
 	url := fmt.Sprintf("%s/uploadfile?auth=%s&folderid=0", config.GlobalConfig.PCloud.BaseURL, apiToken)
-	req, err := http.NewRequest("POST", url, body)
+	req, err := http.NewRequest("POST", url, pr)
 	if err != nil {
 		return 0, "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	// Send request
-	client := &http.Client{Timeout: 5 * time.Minute}
+	// ✅ Increase timeout for large files
+	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, "", err
 	}
 	defer resp.Body.Close()
+
+	// Check goroutine error
+	if uploadErr := <-errChan; uploadErr != nil {
+		return 0, "", uploadErr
+	}
 
 	// Parse response
 	var uploadResp PCloudUploadResponse

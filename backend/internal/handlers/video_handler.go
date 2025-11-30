@@ -29,6 +29,14 @@ func (h *VideoHandler) GetFeed(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
 
+	// ✅ VALIDATE PAGINATION
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
 	videos, total, err := h.videoService.GetFeedVideos(page, limit)
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get videos")
@@ -67,6 +75,11 @@ func (h *VideoHandler) GetRelatedVideos(c *fiber.Ctx) error {
 	}
 
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	
+	// ✅ VALIDATE LIMIT
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
 
 	videos, err := h.videoService.GetRelatedVideos(id, limit)
 	if err != nil {
@@ -78,12 +91,26 @@ func (h *VideoHandler) GetRelatedVideos(c *fiber.Ctx) error {
 	}, "")
 }
 
-// SearchVideos searches videos with optional category filter
+// ✅ FIXED: SearchVideos with keyword validation and sanitization
 func (h *VideoHandler) SearchVideos(c *fiber.Ctx) error {
 	keyword := c.Query("q", "")
 	categoryIDStr := c.Query("category_id", "")
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+
+	// ✅ VALIDATE AND SANITIZE KEYWORD
+	if len(keyword) > 100 {
+		keyword = keyword[:100]
+	}
+	keyword = utils.SanitizeString(keyword)
+
+	// ✅ VALIDATE PAGINATION
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
 
 	var categoryID *uuid.UUID
 	if categoryIDStr != "" {
@@ -115,6 +142,14 @@ func (h *VideoHandler) GetVideosByCategory(c *fiber.Ctx) error {
 
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+
+	// ✅ VALIDATE PAGINATION
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
 
 	videos, total, err := h.videoService.GetVideosByCategory(categoryID, page, limit)
 	if err != nil {
@@ -156,6 +191,14 @@ func (h *VideoHandler) TrackView(c *fiber.Ctx) error {
 
 	if err := c.BodyParser(&req); err != nil {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// ✅ VALIDATE DURATIONS
+	if req.WatchDuration < 0 {
+		req.WatchDuration = 0
+	}
+	if req.VideoDuration < 0 {
+		req.VideoDuration = 0
 	}
 
 	// Get user ID if authenticated

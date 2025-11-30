@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bobastream/internal/services"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -393,7 +394,7 @@ func (h *StreamHandler) ShowPlayer(c *fiber.Ctx) error {
 	return c.SendString(html)
 }
 
-// StreamVideo proxies video from pCloud
+// ✅ FIXED: StreamVideo with context cancellation to prevent goroutine leak
 func (h *StreamHandler) StreamVideo(c *fiber.Ctx) error {
 	token := c.Params("token")
 
@@ -403,13 +404,16 @@ func (h *StreamHandler) StreamVideo(c *fiber.Ctx) error {
 		return c.Status(404).SendString("Video not found")
 	}
 
-	// Create HTTP client
+	// ✅ Use request context for cancellation
+	ctx := c.Context()
+
+	// Create HTTP client with longer timeout for streaming
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 10 * time.Minute, // ✅ Increased from 30s to 10 minutes
 	}
 
-	// Create request to pCloud
-	req, err := http.NewRequest("GET", video.SourceURL, nil)
+	// ✅ Create request with context (enables cancellation)
+	req, err := http.NewRequestWithContext(ctx, "GET", video.SourceURL, nil)
 	if err != nil {
 		return c.Status(500).SendString("Failed to create request")
 	}
@@ -422,6 +426,10 @@ func (h *StreamHandler) StreamVideo(c *fiber.Ctx) error {
 	// Make request
 	resp, err := client.Do(req)
 	if err != nil {
+		// ✅ Check if context was cancelled
+		if ctx.Err() == context.Canceled {
+			return nil // User cancelled, clean exit
+		}
 		return c.Status(500).SendString("Failed to fetch video")
 	}
 	defer resp.Body.Close()
@@ -442,7 +450,11 @@ func (h *StreamHandler) StreamVideo(c *fiber.Ctx) error {
 	// Set status code
 	c.Status(resp.StatusCode)
 
-	// Stream video
+	// ✅ Stream with context awareness
 	_, err = io.Copy(c.Response().BodyWriter(), resp.Body)
+	if err != nil && ctx.Err() == context.Canceled {
+		return nil // User cancelled, clean exit
+	}
+	
 	return err
 }
