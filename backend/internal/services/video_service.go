@@ -46,7 +46,7 @@ func (s *VideoService) GetFeedVideos(page, limit int) ([]models.Video, int64, er
 		return nil, 0, err
 	}
 
-	// ✅ FIX: Don't overwrite ViewCount, use separate scoring
+	// Score videos
 	scoredVideos := make([]ScoredVideo, len(videos))
 	for i := range videos {
 		scoredVideos[i] = ScoredVideo{
@@ -114,8 +114,7 @@ func (s *VideoService) GetRelatedVideos(videoID uuid.UUID, limit int) ([]models.
 	return s.videoRepo.GetRelatedVideos(videoID, categoryID, tags, limit)
 }
 
-// TrackVideoView tracks video view with watch duration
-// ✅ FIXED: Proper view count increment logic (only once per session when >= 30%)
+// ✅ FIXED: TrackVideoView with proper view count increment logic
 func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sessionID, viewerIP, userAgent string, watchDuration int, videoDuration int) error {
 	// Calculate watched percentage
 	watchedPercentage := 0.0
@@ -132,15 +131,14 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 		return err
 	}
 
-	// ✅ LOGIC: Determine if we should increment view count
 	shouldIncrementView := false
 
 	if existingView != nil {
-		// ✅ View exists - check if it was previously invalid (<30%) and now valid (>=30%)
+		// ✅ View exists - check if crossing 30% threshold
 		wasInvalid := existingView.WatchedPercentage < 30
 		isNowValid := watchedPercentage >= 30
 
-		// Update existing view
+		// Update existing view record
 		existingView.WatchDurationSeconds = watchDuration
 		existingView.WatchedPercentage = watchedPercentage
 
@@ -148,7 +146,7 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 			return err
 		}
 
-		// ✅ Increment ONLY if previously invalid, now valid (first time reaching 30%)
+		// ✅ Increment ONLY when crossing 30% threshold (first time)
 		if wasInvalid && isNowValid {
 			shouldIncrementView = true
 		}
@@ -168,7 +166,7 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 			return err
 		}
 
-		// ✅ Increment if first view is already valid (>= 30%)
+		// ✅ Increment if first view is already >= 30%
 		if watchedPercentage >= 30 {
 			shouldIncrementView = true
 		}

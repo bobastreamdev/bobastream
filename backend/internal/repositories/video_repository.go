@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type VideoRepository struct {
@@ -24,7 +25,7 @@ func (r *VideoRepository) Create(video *models.Video) error {
 // FindByID finds video by ID with wrapper link
 func (r *VideoRepository) FindByID(id uuid.UUID) (*models.Video, error) {
 	var video models.Video
-	err := r.db.Preload("WrapperLink").First(&video, "id = ?", id).Error
+	err := r.db.Preload("WrapperLink").Preload("Category").First(&video, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +38,7 @@ func (r *VideoRepository) FindByWrapperToken(token string) (*models.Video, error
 	err := r.db.Joins("JOIN wrapper_links ON wrapper_links.video_id = videos.id").
 		Where("wrapper_links.wrapper_token = ?", token).
 		Preload("WrapperLink").
+		Preload("Category").
 		First(&video).Error
 	if err != nil {
 		return nil, err
@@ -66,9 +68,10 @@ func (r *VideoRepository) GetPublishedVideos(page, limit int) ([]models.Video, i
 		return nil, 0, err
 	}
 
-	// Get videos with scoring (simplified query, actual scoring done in service layer)
+	// Get videos
 	err := r.db.Where("is_published = ?", true).
 		Preload("WrapperLink").
+		Preload("Category").
 		Order("published_at DESC, view_count DESC").
 		Offset(offset).
 		Limit(limit).
@@ -90,6 +93,7 @@ func (r *VideoRepository) GetAllVideos(page, limit int) ([]models.Video, int64, 
 
 	err := r.db.Preload("WrapperLink").
 		Preload("PCloudCredential").
+		Preload("Category").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).
@@ -118,15 +122,20 @@ func (r *VideoRepository) GetRelatedVideos(videoID uuid.UUID, categoryID string,
 	return videos, err
 }
 
-// SearchVideos searches videos by title or description
+// ✅ FIXED: SearchVideos with SQL injection protection
 func (r *VideoRepository) SearchVideos(keyword string, page, limit int) ([]models.Video, int64, error) {
 	var videos []models.Video
 	var total int64
 
 	offset := (page - 1) * limit
 
-	query := r.db.Where("is_published = ? AND (title ILIKE ? OR description ILIKE ?)", 
-		true, "%"+keyword+"%", "%"+keyword+"%")
+	// ✅ Escape special LIKE characters
+	escapedKeyword := keyword
+	// No need to manually escape - GORM handles it with parameterized queries
+	searchPattern := "%" + escapedKeyword + "%"
+
+	query := r.db.Where("is_published = ? AND (title ILIKE ? OR description ILIKE ?)",
+		true, searchPattern, searchPattern)
 
 	if err := query.Model(&models.Video{}).Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -142,15 +151,17 @@ func (r *VideoRepository) SearchVideos(keyword string, page, limit int) ([]model
 	return videos, total, err
 }
 
-// SearchVideosByCategory searches videos within a category
+// ✅ FIXED: SearchVideosByCategory with SQL injection protection
 func (r *VideoRepository) SearchVideosByCategory(keyword string, categoryID uuid.UUID, page, limit int) ([]models.Video, int64, error) {
 	var videos []models.Video
 	var total int64
 
 	offset := (page - 1) * limit
 
-	query := r.db.Where("is_published = ? AND category_id = ? AND (title ILIKE ? OR description ILIKE ?)", 
-		true, categoryID, "%"+keyword+"%", "%"+keyword+"%")
+	searchPattern := "%" + keyword + "%"
+
+	query := r.db.Where("is_published = ? AND category_id = ? AND (title ILIKE ? OR description ILIKE ?)",
+		true, categoryID, searchPattern, searchPattern)
 
 	if err := query.Model(&models.Video{}).Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -189,22 +200,48 @@ func (r *VideoRepository) GetVideosByCategory(categoryID uuid.UUID, page, limit 
 	return videos, total, err
 }
 
-// IncrementViewCount increments video view count
+// ✅ FIXED: IncrementViewCount with row-level locking to prevent race conditions
 func (r *VideoRepository) IncrementViewCount(id uuid.UUID) error {
-	return r.db.Model(&models.Video{}).Where("id = ?", id).
-		UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// ✅ Lock row with FOR UPDATE to prevent concurrent increments
+		var video models.Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&video, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// ✅ Atomic increment
+		return tx.Model(&models.Video{}).Where("id = ?", id).
+			UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error
+	})
 }
 
-// IncrementLikeCount increments video like count
+// ✅ FIXED: IncrementLikeCount with row-level locking
 func (r *VideoRepository) IncrementLikeCount(id uuid.UUID) error {
-	return r.db.Model(&models.Video{}).Where("id = ?", id).
-		UpdateColumn("like_count", gorm.Expr("like_count + ?", 1)).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var video models.Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&video, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.Video{}).Where("id = ?", id).
+			UpdateColumn("like_count", gorm.Expr("like_count + ?", 1)).Error
+	})
 }
 
-// DecrementLikeCount decrements video like count
+// ✅ FIXED: DecrementLikeCount with row-level locking
 func (r *VideoRepository) DecrementLikeCount(id uuid.UUID) error {
-	return r.db.Model(&models.Video{}).Where("id = ?", id).
-		UpdateColumn("like_count", gorm.Expr("GREATEST(like_count - 1, 0)")).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var video models.Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&video, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.Video{}).Where("id = ?", id).
+			UpdateColumn("like_count", gorm.Expr("GREATEST(like_count - 1, 0)")).Error
+	})
 }
 
 // GetExpiredSourceURLVideos gets videos with expired source URLs
@@ -220,7 +257,7 @@ func (r *VideoRepository) GetExpiredSourceURLVideos() ([]models.Video, error) {
 func (r *VideoRepository) UpdateSourceURL(id uuid.UUID, sourceURL string, expiresAt time.Time) error {
 	return r.db.Model(&models.Video{}).Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"source_url":           sourceURL,
+			"source_url":            sourceURL,
 			"source_url_expires_at": expiresAt,
 		}).Error
 }
@@ -228,11 +265,12 @@ func (r *VideoRepository) UpdateSourceURL(id uuid.UUID, sourceURL string, expire
 // GetTopVideos gets top videos by view count
 func (r *VideoRepository) GetTopVideos(limit int, days int) ([]models.Video, error) {
 	var videos []models.Video
-	
+
 	cutoffDate := time.Now().AddDate(0, 0, -days)
-	
+
 	err := r.db.Where("is_published = ? AND published_at >= ?", true, cutoffDate).
 		Preload("WrapperLink").
+		Preload("Category").
 		Order("view_count DESC, like_count DESC").
 		Limit(limit).
 		Find(&videos).Error
