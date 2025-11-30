@@ -35,21 +35,21 @@ func NewPCloudService(
 type PCloudUploadResponse struct {
 	Result   int    `json:"result"`
 	Metadata []struct {
-		Name     string  `json:"name"`
-		FileID   int64   `json:"fileid"`
-		Size     int64   `json:"size"`
-		Hash     string  `json:"hash"`
+		Name   string `json:"name"`
+		FileID int64  `json:"fileid"`
+		Size   int64  `json:"size"`
+		Hash   string `json:"hash"`
 	} `json:"metadata"`
 	Error string `json:"error,omitempty"`
 }
 
 // PCloudLinkResponse response from pCloud getfilelink API
 type PCloudLinkResponse struct {
-	Result int      `json:"result"`
-	Hosts  []string `json:"hosts"`
-	Path   string   `json:"path"`
-	Expires string  `json:"expires"`
-	Error  string   `json:"error,omitempty"`
+	Result  int      `json:"result"`
+	Hosts   []string `json:"hosts"`
+	Path    string   `json:"path"`
+	Expires string   `json:"expires"`
+	Error   string   `json:"error,omitempty"`
 }
 
 // GetAvailableAccount gets pCloud account with most available space (auto-rotate)
@@ -84,23 +84,53 @@ func (s *PCloudService) GetAvailableAccount() (*models.PCloudCredential, error) 
 
 // UploadFile uploads file to pCloud with auto-rotate account
 func (s *PCloudService) UploadFile(file multipart.File, filename string, fileSize int64) (*models.PCloudCredential, int64, string, error) {
+	// ✅ CALCULATE FILE SIZE IN GB
+	fileSizeMB := float64(fileSize) / (1024 * 1024)
+	fileSizeGB := fileSizeMB / 1024
+
 	// Get available account (auto-rotate based on storage)
 	credential, err := s.GetAvailableAccount()
 	if err != nil {
 		return nil, 0, "", err
 	}
 
+	// ✅ CHECK IF FILE SIZE EXCEEDS AVAILABLE STORAGE
+	availableGB := credential.StorageLimitGB - credential.StorageUsedGB
+	if fileSizeGB > availableGB {
+		return nil, 0, "", fmt.Errorf(
+			"file size (%.2fGB) exceeds available storage (%.2fGB) in account '%s'",
+			fileSizeGB,
+			availableGB,
+			credential.AccountName,
+		)
+	}
+
+	// ✅ CHECK IF FILE SIZE EXCEEDS 10% OF TOTAL STORAGE (safety limit)
+	maxAllowedGB := credential.StorageLimitGB * 0.1 // 10% of total
+	if fileSizeGB > maxAllowedGB {
+		return nil, 0, "", fmt.Errorf(
+			"file size (%.2fGB) exceeds maximum allowed file size (%.2fGB) for account '%s'",
+			fileSizeGB,
+			maxAllowedGB,
+			credential.AccountName,
+		)
+	}
+
 	// Upload to pCloud
 	fileID, hash, err := s.uploadToPCloud(credential.APIToken, file, filename)
 	if err != nil {
-		return nil, 0, "", err
+		return nil, 0, "", fmt.Errorf("pCloud upload failed: %w", err)
 	}
 
-	// Update storage used
-	fileSizeMB := float64(fileSize) / (1024 * 1024)
-	credential.StorageUsedGB += fileSizeMB / 1024
+	// ✅ UPDATE STORAGE USED (WITH SAFETY MARGIN 5%)
+	storageIncrease := fileSizeGB * 1.05 // Add 5% overhead for metadata
+	credential.StorageUsedGB += storageIncrease
+
 	if err := s.pcloudRepo.Update(credential); err != nil {
-		return nil, 0, "", err
+		// ⚠️ NON-CRITICAL ERROR: File uploaded but storage tracking failed
+		// Log this but don't fail the upload
+		fmt.Printf("⚠️  WARNING: Failed to update storage tracking for account '%s': %v\n",
+			credential.AccountName, err)
 	}
 
 	return credential, fileID, hash, nil

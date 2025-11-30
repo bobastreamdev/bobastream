@@ -13,10 +13,10 @@ import (
 )
 
 type VideoService struct {
-	videoRepo       *repositories.VideoRepository
-	wrapperRepo     *repositories.WrapperLinkRepository
-	videoViewRepo   *repositories.VideoViewRepository
-	videoLikeRepo   *repositories.VideoLikeRepository
+	videoRepo     *repositories.VideoRepository
+	wrapperRepo   *repositories.WrapperLinkRepository
+	videoViewRepo *repositories.VideoViewRepository
+	videoLikeRepo *repositories.VideoLikeRepository
 }
 
 func NewVideoService(
@@ -33,6 +33,12 @@ func NewVideoService(
 	}
 }
 
+// ScoredVideo is a helper struct for sorting videos by score
+type ScoredVideo struct {
+	Video models.Video
+	Score float64
+}
+
 // GetFeedVideos gets feed videos with scoring
 func (s *VideoService) GetFeedVideos(page, limit int) ([]models.Video, int64, error) {
 	videos, total, err := s.videoRepo.GetPublishedVideos(page, limit)
@@ -40,16 +46,27 @@ func (s *VideoService) GetFeedVideos(page, limit int) ([]models.Video, int64, er
 		return nil, 0, err
 	}
 
-	// Apply scoring and sort
+	// ✅ FIX: Don't overwrite ViewCount, use separate scoring
+	scoredVideos := make([]ScoredVideo, len(videos))
 	for i := range videos {
-		videos[i].ViewCount = int(utils.CalculateVideoScore(&videos[i]))
+		scoredVideos[i] = ScoredVideo{
+			Video: videos[i],
+			Score: utils.CalculateVideoScore(&videos[i]),
+		}
 	}
 
-	sort.Slice(videos, func(i, j int) bool {
-		return videos[i].ViewCount > videos[j].ViewCount
+	// Sort by score (highest first)
+	sort.Slice(scoredVideos, func(i, j int) bool {
+		return scoredVideos[i].Score > scoredVideos[j].Score
 	})
 
-	return videos, total, nil
+	// Extract sorted videos
+	result := make([]models.Video, len(scoredVideos))
+	for i, sv := range scoredVideos {
+		result[i] = sv.Video
+	}
+
+	return result, total, nil
 }
 
 // GetVideoByID gets video by ID
@@ -98,6 +115,7 @@ func (s *VideoService) GetRelatedVideos(videoID uuid.UUID, limit int) ([]models.
 }
 
 // TrackVideoView tracks video view with watch duration
+// ✅ FIXED: Proper view count increment logic (only once per session when >= 30%)
 func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sessionID, viewerIP, userAgent string, watchDuration int, videoDuration int) error {
 	// Calculate watched percentage
 	watchedPercentage := 0.0
@@ -108,36 +126,56 @@ func (s *VideoService) TrackVideoView(videoID uuid.UUID, userID *uuid.UUID, sess
 		}
 	}
 
-	// Check if view already exists
+	// Check if view already exists for this session
 	existingView, err := s.videoViewRepo.FindBySessionAndVideo(sessionID, videoID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 
+	// ✅ LOGIC: Determine if we should increment view count
+	shouldIncrementView := false
+
 	if existingView != nil {
+		// ✅ View exists - check if it was previously invalid (<30%) and now valid (>=30%)
+		wasInvalid := existingView.WatchedPercentage < 30
+		isNowValid := watchedPercentage >= 30
+
 		// Update existing view
 		existingView.WatchDurationSeconds = watchDuration
 		existingView.WatchedPercentage = watchedPercentage
-		return s.videoViewRepo.Update(existingView)
+
+		if err := s.videoViewRepo.Update(existingView); err != nil {
+			return err
+		}
+
+		// ✅ Increment ONLY if previously invalid, now valid (first time reaching 30%)
+		if wasInvalid && isNowValid {
+			shouldIncrementView = true
+		}
+	} else {
+		// ✅ New view - create record
+		view := &models.VideoView{
+			VideoID:              videoID,
+			UserID:               userID,
+			ViewerIP:             viewerIP,
+			UserAgent:            userAgent,
+			WatchDurationSeconds: watchDuration,
+			WatchedPercentage:    watchedPercentage,
+			SessionID:            sessionID,
+		}
+
+		if err := s.videoViewRepo.Create(view); err != nil {
+			return err
+		}
+
+		// ✅ Increment if first view is already valid (>= 30%)
+		if watchedPercentage >= 30 {
+			shouldIncrementView = true
+		}
 	}
 
-	// Create new view
-	view := &models.VideoView{
-		VideoID:              videoID,
-		UserID:               userID,
-		ViewerIP:             viewerIP,
-		UserAgent:            userAgent,
-		WatchDurationSeconds: watchDuration,
-		WatchedPercentage:    watchedPercentage,
-		SessionID:            sessionID,
-	}
-
-	if err := s.videoViewRepo.Create(view); err != nil {
-		return err
-	}
-
-	// Increment view count if watched >= 30%
-	if watchedPercentage >= 30 {
+	// ✅ Increment view count if conditions met
+	if shouldIncrementView {
 		return s.videoRepo.IncrementViewCount(videoID)
 	}
 

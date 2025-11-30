@@ -39,14 +39,32 @@ func (h *AdminVideoHandler) UploadVideo(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Video file is required")
 	}
 
-	title := c.FormValue("title")
-	description := c.FormValue("description")
-	thumbnailURL := c.FormValue("thumbnail_url")
+	// ✅ SANITIZE ALL USER INPUTS
+	title := utils.SanitizeString(c.FormValue("title"))
+	description := utils.SanitizeString(c.FormValue("description"))
+	thumbnailURL := utils.SanitizeURL(c.FormValue("thumbnail_url"))
 	categoryIDStr := c.FormValue("category_id")
 	tagsStr := c.FormValue("tags") // comma-separated
+	durationStr := c.FormValue("duration_seconds")
 
+	// Validate required fields
 	if title == "" {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Title is required")
+	}
+
+	// ✅ TRUNCATE TITLE (max 500 chars as per DB schema)
+	title = utils.TruncateString(title, 500)
+
+	// ✅ TRUNCATE DESCRIPTION (max 10000 chars reasonable limit)
+	description = utils.TruncateString(description, 10000)
+
+	// Parse duration (admin manual input)
+	durationSeconds := 0
+	if durationStr != "" {
+		durationSeconds, _ = strconv.Atoi(durationStr)
+		if durationSeconds < 0 {
+			durationSeconds = 0
+		}
 	}
 
 	// Open file
@@ -77,13 +95,20 @@ func (h *AdminVideoHandler) UploadVideo(c *fiber.Ctx) error {
 		}
 	}
 
-	// Parse tags
+	// ✅ SANITIZE TAGS
 	var tags []string
 	if tagsStr != "" {
-		tags = strings.Split(tagsStr, ",")
-		// Trim spaces
+		rawTags := strings.Split(tagsStr, ",")
+		tags = utils.SanitizeStrings(rawTags)
+		
+		// ✅ LIMIT NUMBER OF TAGS (max 20)
+		if len(tags) > 20 {
+			tags = tags[:20]
+		}
+		
+		// ✅ LIMIT TAG LENGTH (max 50 chars each)
 		for i := range tags {
-			tags[i] = strings.TrimSpace(tags[i])
+			tags[i] = utils.TruncateString(tags[i], 50)
 		}
 	}
 
@@ -94,6 +119,7 @@ func (h *AdminVideoHandler) UploadVideo(c *fiber.Ctx) error {
 		ThumbnailURL:       thumbnailURL,
 		SourceURL:          sourceURL,
 		SourceURLExpiresAt: &expiresAt,
+		DurationSeconds:    durationSeconds,
 		FileSizeMB:         float64(file.Size) / (1024 * 1024),
 		PCloudFileID:       fmt.Sprintf("%d", fileID),
 		PCloudCredentialID: credential.ID,
@@ -119,8 +145,8 @@ func (h *AdminVideoHandler) UploadVideo(c *fiber.Ctx) error {
 		"video":        video,
 		"wrapper_link": wrapperLink,
 		"pcloud_account": fiber.Map{
-			"account_name": credential.AccountName,
-			"storage_used": credential.StorageUsedGB,
+			"account_name":  credential.AccountName,
+			"storage_used":  credential.StorageUsedGB,
 			"storage_limit": credential.StorageLimitGB,
 		},
 	}, "Video uploaded successfully")
@@ -130,6 +156,14 @@ func (h *AdminVideoHandler) UploadVideo(c *fiber.Ctx) error {
 func (h *AdminVideoHandler) GetAllVideos(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+
+	// ✅ VALIDATE PAGINATION PARAMS
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
 
 	videos, total, err := h.videoService.GetAllVideos(page, limit)
 	if err != nil {
@@ -169,16 +203,27 @@ func (h *AdminVideoHandler) UpdateVideo(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Update fields
+	// ✅ SANITIZE AND UPDATE FIELDS
 	if req.Title != "" {
-		video.Title = req.Title
+		sanitizedTitle := utils.SanitizeString(req.Title)
+		if sanitizedTitle == "" {
+			return utils.ErrorResponse(c, fiber.StatusBadRequest, "Title cannot be empty")
+		}
+		video.Title = utils.TruncateString(sanitizedTitle, 500)
 	}
+
 	if req.Description != "" {
-		video.Description = req.Description
+		video.Description = utils.TruncateString(utils.SanitizeString(req.Description), 10000)
 	}
+
 	if req.ThumbnailURL != "" {
-		video.ThumbnailURL = req.ThumbnailURL
+		sanitizedURL := utils.SanitizeURL(req.ThumbnailURL)
+		if sanitizedURL == "" {
+			return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid thumbnail URL")
+		}
+		video.ThumbnailURL = sanitizedURL
 	}
+
 	if req.CategoryID != nil {
 		if *req.CategoryID == "" {
 			video.CategoryID = nil
@@ -189,9 +234,24 @@ func (h *AdminVideoHandler) UpdateVideo(c *fiber.Ctx) error {
 			}
 		}
 	}
+
 	if req.Tags != nil {
-		video.Tags = req.Tags
+		// ✅ SANITIZE TAGS
+		sanitizedTags := utils.SanitizeStrings(req.Tags)
+		
+		// ✅ LIMIT NUMBER OF TAGS (max 20)
+		if len(sanitizedTags) > 20 {
+			sanitizedTags = sanitizedTags[:20]
+		}
+		
+		// ✅ LIMIT TAG LENGTH (max 50 chars each)
+		for i := range sanitizedTags {
+			sanitizedTags[i] = utils.TruncateString(sanitizedTags[i], 50)
+		}
+		
+		video.Tags = sanitizedTags
 	}
+
 	if req.IsPublished != nil {
 		video.IsPublished = *req.IsPublished
 		if *req.IsPublished && video.PublishedAt == nil {
@@ -254,7 +314,7 @@ func (h *AdminVideoHandler) RefreshVideoLink(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, fiber.Map{
-		"source_url":           newURL,
+		"source_url":            newURL,
 		"source_url_expires_at": expiresAt,
 	}, "Link refreshed successfully")
 }

@@ -41,7 +41,15 @@ func main() {
 		log.Fatal("Failed to seed sample ads:", err)
 	}
 
-	log.Println("✅ Database seeding completed successfully!")
+    if err := seedSamplePCloudCredential(db); err != nil {
+        log.Fatal("Failed to seed pCloud credential:", err)
+    }
+    
+    if err := seedSampleVideo(db); err != nil {
+        log.Fatal("Failed to seed sample video:", err)
+    }
+    
+    log.Println("✅ Database seeding completed successfully!")
 }
 
 // seedCategories seeds default categories

@@ -23,6 +23,14 @@ func (h *AdminAdHandler) GetAllAds(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "20"))
 
+	// ✅ VALIDATE PAGINATION PARAMS
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
 	ads, total, err := h.adService.GetAllAds(page, limit)
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get ads")
@@ -69,20 +77,57 @@ func (h *AdminAdHandler) CreateAd(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Parse ad type
+	// ✅ SANITIZE INPUTS
+	title := utils.SanitizeString(req.Title)
+	if title == "" {
+		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Title is required")
+	}
+	title = utils.TruncateString(title, 255)
+
+	// ✅ SANITIZE URLs
+	contentURL := utils.SanitizeURL(req.ContentURL)
+	redirectURL := utils.SanitizeURL(req.RedirectURL)
+
+	// ✅ VALIDATE AD TYPE
 	adType := models.AdTypePreroll
 	switch req.AdType {
 	case "banner":
 		adType = models.AdTypeBanner
 	case "popup":
 		adType = models.AdTypePopup
+	case "preroll":
+		adType = models.AdTypePreroll
+	default:
+		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid ad type. Must be: preroll, banner, or popup")
+	}
+
+	// ✅ VALIDATE NUMERIC FIELDS
+	if req.DurationSeconds < 0 {
+		req.DurationSeconds = 0
+	}
+	if req.DurationSeconds > 300 { // Max 5 minutes
+		req.DurationSeconds = 300
+	}
+
+	if req.DisplayFrequency < 1 {
+		req.DisplayFrequency = 1
+	}
+	if req.DisplayFrequency > 100 {
+		req.DisplayFrequency = 100
+	}
+
+	if req.Priority < 0 {
+		req.Priority = 0
+	}
+	if req.Priority > 999 {
+		req.Priority = 999
 	}
 
 	ad := &models.Ad{
-		Title:            req.Title,
+		Title:            title,
 		AdType:           adType,
-		ContentURL:       req.ContentURL,
-		RedirectURL:      req.RedirectURL,
+		ContentURL:       contentURL,
+		RedirectURL:      redirectURL,
 		DurationSeconds:  req.DurationSeconds,
 		DisplayFrequency: req.DisplayFrequency,
 		Priority:         req.Priority,
@@ -125,23 +170,53 @@ func (h *AdminAdHandler) UpdateAd(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Update fields
+	// ✅ SANITIZE AND UPDATE FIELDS
 	if req.Title != "" {
-		ad.Title = req.Title
+		sanitizedTitle := utils.SanitizeString(req.Title)
+		if sanitizedTitle == "" {
+			return utils.ErrorResponse(c, fiber.StatusBadRequest, "Title cannot be empty")
+		}
+		ad.Title = utils.TruncateString(sanitizedTitle, 255)
 	}
+
 	if req.ContentURL != "" {
-		ad.ContentURL = req.ContentURL
+		sanitizedURL := utils.SanitizeURL(req.ContentURL)
+		if sanitizedURL == "" {
+			return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid content URL")
+		}
+		ad.ContentURL = sanitizedURL
 	}
+
 	if req.RedirectURL != "" {
-		ad.RedirectURL = req.RedirectURL
+		sanitizedURL := utils.SanitizeURL(req.RedirectURL)
+		if sanitizedURL == "" {
+			return utils.ErrorResponse(c, fiber.StatusBadRequest, "Invalid redirect URL")
+		}
+		ad.RedirectURL = sanitizedURL
 	}
+
+	// ✅ VALIDATE NUMERIC FIELDS
 	if req.DurationSeconds > 0 {
+		if req.DurationSeconds > 300 {
+			req.DurationSeconds = 300
+		}
 		ad.DurationSeconds = req.DurationSeconds
 	}
+
 	if req.DisplayFrequency > 0 {
+		if req.DisplayFrequency > 100 {
+			req.DisplayFrequency = 100
+		}
 		ad.DisplayFrequency = req.DisplayFrequency
 	}
-	ad.Priority = req.Priority
+
+	if req.Priority >= 0 {
+		if req.Priority > 999 {
+			req.Priority = 999
+		}
+		ad.Priority = req.Priority
+	}
+
 	if req.IsActive != nil {
 		ad.IsActive = *req.IsActive
 	}
